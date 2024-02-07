@@ -1,0 +1,214 @@
+---
+title: "Exercise 1"
+author: "River Kim"
+date: "2024-02-06"
+output: html_document
+---
+## Data & Packages
+```{r}
+library(tidyverse)
+library(tidytext) 
+library(ggthemes) 
+library(readr) 
+library(babynames) 
+edbfdata <- read_csv("data/wordfreq/edbookfestall.csv")
+```
+
+
+##Tidy data
+```{r}
+colnames(edbfdata)
+glimpse(edbfdata)
+
+# get simplified dataset with only event contents and year
+evdes <- edbfdata %>%
+  select(description, year)
+
+head(evdes)
+
+# tidy text
+tidy_des <- evdes %>%
+  mutate(desc = tolower(description)) %>% #lower case character
+  unnest_tokens(word, desc) %>%
+  filter(str_detect(word, "[a-z]"))
+
+tidy_des <- tidy_des %>%
+  filter(!word %in% stop_words$word)
+
+remove_reg <- c("&amp;","&lt;","&gt;","<p>", "</p>","&rsquo", "&lsquo;",  "&#39;", "<strong>", "</strong>", "rsquo", "em", "ndash", "nbsp", "lsquo", "strong")
+
+tidy_des <- tidy_des %>%
+  filter(!word %in% remove_reg)
+
+edbf_term_counts <- tidy_des %>% 
+  group_by(year) %>%
+  count(word, sort = TRUE)
+```
+
+##Gender-related words counts
+```{r}
+# gender words with grepl()
+edbf_term_counts$womword <- as.integer(grepl("women|feminist|feminism|gender|harassment|sexism|sexist", x = edbf_term_counts$word))
+
+#get counts by year and word
+edbf_counts <- edbf_term_counts %>%
+  group_by(year) %>%
+  mutate(year_total = sum(n)) %>%
+  filter(womword==1) %>%
+  summarise(sum_wom = sum(n),
+            year_total= min(year_total))
+
+ggplot(edbf_counts, aes(year, sum_wom / year_total, group=1)) +
+  geom_line() +
+  xlab("Year") +
+  ylab("% gender-related words") +
+  scale_y_continuous(labels = scales::percent_format(),
+                     expand = c(0, 0), limits = c(0, NA)) +
+  theme_tufte(base_family = "Helvetica") 
+
+ggplot(edbf_counts, aes(year, sum_wom / year_total, group=1)) +
+  geom_line() +
+  geom_vline(xintercept = 2017, col="red") +
+  xlab("Year") +
+  ylab("% gender-related words") +
+  scale_y_continuous(labels = scales::percent_format(),
+                     expand = c(0, 0), limits = c(0, NA)) +
+  theme_tufte(base_family = "Helvetica")
+
+ggplot(edbf_counts, aes(year, sum_wom / year_total, group=1)) +
+  geom_line() +
+  geom_vline(xintercept = 2017, col="red") +
+  geom_text(aes(x=2017.1, label="#metoo year", y=.0015), 
+            colour="black", angle=90, text=element_text(size=8)) +
+  xlab("Year") +
+  ylab("% gender-related words") +
+  scale_y_continuous(labels = scales::percent_format(),
+                     expand = c(0, 0), limits = c(0, NA)) +
+  theme_tufte(base_family = "Helvetica")
+```
+
+##Predicting gender of writers
+```{r}
+# get columns for artist name and year, omitting NAs
+gendes <- edbfdata %>%
+  select(artist, year) %>%
+  na.omit()
+
+# generate new column with just the artist's (author's) first name
+gendes$name <- sub(" .*", "", gendes$artist)
+
+#use 'babynames' to predict
+babynames <- babynames
+
+totals_female <- babynames %>%
+  filter(sex=="F") %>%
+  group_by(year) %>%
+  summarise(total_female = sum(n))
+
+totals_male <- babynames %>%
+  filter(sex=="M") %>%
+  group_by(year) %>%
+  summarise(total_male = sum(n))
+
+totals <- merge(totals_female, totals_male)
+
+totsm <- merge(babynames, totals, by = "year")
+head(totsm)
+
+totprops <- totsm %>%
+  filter(year >= 1920) %>%
+  group_by(name, year) %>%
+  mutate(sumname = sum(n),
+         prop = ifelse(sumname==n, 1,
+                       n/sumname)) %>%
+  filter(prop!=.5) %>%
+  group_by(name) %>%
+  slice(which.max(prop)) %>%
+  summarise(prop = max(prop),
+            totaln = sum(n),
+            name = max(name),
+            sex = unique(sex))
+
+ednameprops <- merge(totprops, gendes, by = "name")
+
+ggplot(ednameprops, aes(x=year, fill = factor(sex))) +
+  geom_bar(position = "fill") +
+  xlab("Year") +
+  ylab("% women authors") +
+  labs(fill="") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_tufte(base_family = "Helvetica") +
+  geom_abline(slope=0, intercept=0.5,  col = "black",lty=2)
+
+names1 <- ednameprops$name
+names2 <- gendes$name
+diffs <- setdiff(names2, names1)
+diffs
+```
+
+##Q1 Gemre Literature & Women-related words
+```{r}
+edbfdata %>% count(genre, sort = TRUE)
+
+edbliter <- edbfdata %>% select(description, genre, year)
+head(edbliter)
+edbliter <- edbliter %>% filter(genre == "Literature")
+
+tidy_liter <- edbliter %>%
+  mutate(desc = tolower(description)) %>%
+  unnest_tokens(word, desc) %>%
+  filter(str_detect(word, "[a-z]"))
+
+tidy_liter <- tidy_liter %>%
+  filter(!word %in% stop_words$word)
+
+tidy_liter %>% count(word, sort = TRUE)
+tidy_liter <- tidy_liter %>% filter(!word %in% remove_reg)
+
+
+year_counts_liter <- tidy_liter %>%
+  group_by(year) %>%
+  count(word, sort = TRUE)
+head(year_counts_liter)
+
+year_counts_liter$womword <- as.integer(grepl("women|feminist|feminism|gender|harassment|sexism|sexist", x = year_counts_liter$word))
+head(year_counts_liter)
+
+liter_counts <- year_counts_liter %>%
+  group_by(year) %>%
+  mutate(year_total = sum(n)) %>%
+  filter(womword==1) %>%
+  summarise(sum_wom = sum(n), year_total=min(year_total))
+
+head(liter_counts)
+
+ggplot(liter_counts, aes(year, sum_wom / year_total, group=1)) +
+  geom_line() +
+  xlab("Year") + 
+  ylab("% gender-related words") + 
+  scale_y_continuous(labels = scales::percent_format(),
+                     expand = c(0, 0), limits = c(0, NA))
+```
+
+##Q2 Race-related words 
+```{r}
+edbf_term_counts$raceword <- as.integer(grepl("race|racist|racism|black|white|asian|nigger|racial|segregated|apartheid", x = edbf_term_counts$word))
+head(edbf_term_counts)
+
+edbf_race <- edbf_term_counts %>%
+  group_by(year) %>% 
+  mutate(year_total = sum(n)) %>%
+  filter(raceword==1) %>% 
+  summarise(sum_race = sum(n),
+            year_total_race=min(year_total))
+head(edbf_race)  
+
+ggplot(edbf_race, aes(year, sum_race / year_total_race, group=1)) +
+  geom_line() + 
+  xlab("Year") +
+  ylab("% Race-related words") +
+  scale_y_continuous(labels = scales::percent_format(), 
+                     expand = c(0, 0), limits = c(0, NA))
+
+```
+
